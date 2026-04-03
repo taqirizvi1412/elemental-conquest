@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Elemental Conquest</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <canvas id="gameCanvas"></canvas>
+
+  <button class="sidebar-toggle" id="sidebarToggle">☰</button>
+
+  <aside class="info-panel" id="sidePanel">
+    <!-- Dark header with faction name + turn -->
+    <div class="sidebar-header" id="sidebarHeader">
+      <div class="sh-faction" id="shFaction">Ember</div>
+      <div class="sh-turn" id="shTurn">Turn 1</div>
+      <button class="sidebar-close" id="sidebarClose">&times;</button>
+    </div>
+
+    <!-- Scrollable body -->
+    <div class="panel-body" id="panelBody">
+
+      <div class="panel-section">
+        <h4>Resources</h4>
+        <div id="resourceInfo"></div>
+      </div>
+
+      <div class="panel-section">
+        <h4>Altar</h4>
+        <div id="altarInfo"></div>
+      </div>
+
+      <div class="panel-section">
+        <h4>Tile Info</h4>
+        <div id="tileInfo">
+          <span class="tile-placeholder">Select a tile to inspect</span>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <h4>Log</h4>
+        <div id="actionLog" class="action-log"></div>
+      </div>
+
+    </div>
+
+    <!-- Pinned controls -->
+    <div class="controls-section">
+      <button class="btn-end-turn" id="btnEndTurn">End Turn</button>
+      <button class="btn-tech" id="btnTech">Tech Tree</button>
+      <div class="controls-links">
+        <button class="btn-link-light" id="btnHowToPlay">How to Play</button>
+        <button class="btn-link-light" id="btnRegenerate">New Game</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Tech panel overlay -->
+  <div id="techOverlay" class="slide-overlay hidden">
+    <div class="slide-backdrop" data-close="tech"></div>
+    <div class="slide-panel" id="techPanel">
+      <div class="slide-header">
+        <div class="slide-title" id="techTitle">Tech Tree</div>
+        <button class="slide-close" data-close="tech">&times;</button>
+      </div>
+      <div class="slide-balance" id="techBalance"></div>
+      <div class="slide-section-label">Shared Techs</div>
+      <div id="sharedTechList" class="card-grid"></div>
+      <div class="slide-section-label" id="factionTechLabel">Faction Techs</div>
+      <div id="factionTechList" class="card-grid"></div>
+    </div>
+  </div>
+
+  <!-- Recruit panel overlay -->
+  <div id="recruitOverlay" class="slide-overlay hidden">
+    <div class="slide-backdrop" data-close="recruit"></div>
+    <div class="slide-panel" id="recruitPanelSlide">
+      <div class="slide-header">
+        <div class="slide-title" id="recruitTitle">Recruit</div>
+        <button class="slide-close" data-close="recruit">&times;</button>
+      </div>
+      <div class="slide-balance" id="recruitBalance"></div>
+      <div id="recruitCardList" class="card-grid"></div>
+    </div>
+  </div>
+
+  <!-- Handoff overlay -->
+  <div id="handoffOverlay" class="handoff-overlay hidden">
+    <div class="handoff-box">
+      <div class="handoff-faction" id="handoffFaction"></div>
+      <div class="handoff-your-turn">Your turn</div>
+      <div class="handoff-hint">Tap anywhere to begin</div>
+    </div>
+  </div>
+
+  <!-- Win overlay -->
+  <div id="winOverlay" class="win-overlay hidden">
+    <div class="win-box">
+      <div class="win-title" id="winTitle"></div>
+      <div class="win-sub" id="winSub"></div>
+      <button class="btn-end-turn" id="btnNewGame">Play Again</button>
+    </div>
+  </div>
+
+  <script src="map.js"></script>
+  <script src="renderer.js"></script>
+  <script src="factions.js"></script>
+  <script src="units.js"></script>
+  <script src="game.js"></script>
+  <script src="tutorial.js"></script>
+  <script>
+    // ---- DOM references ----
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const tileInfoEl = document.getElementById('tileInfo');
+    const shFaction = document.getElementById('shFaction');
+    const shTurn = document.getElementById('shTurn');
+    const resourceInfoEl = document.getElementById('resourceInfo');
+    const altarInfoEl = document.getElementById('altarInfo');
+    const actionLogEl = document.getElementById('actionLog');
+    const sidePanelEl = document.getElementById('sidePanel');
+    const handoffOverlay = document.getElementById('handoffOverlay');
+    const handoffFaction = document.getElementById('handoffFaction');
+    const winOverlay = document.getElementById('winOverlay');
+    const winTitle = document.getElementById('winTitle');
+    const winSub = document.getElementById('winSub');
+    const techOverlay = document.getElementById('techOverlay');
+    const techPanel = document.getElementById('techPanel');
+    const techTitle = document.getElementById('techTitle');
+    const techBalance = document.getElementById('techBalance');
+    const sharedTechList = document.getElementById('sharedTechList');
+    const factionTechList = document.getElementById('factionTechList');
+    const factionTechLabel = document.getElementById('factionTechLabel');
+    const recruitOverlay = document.getElementById('recruitOverlay');
+    const recruitPanelSlide = document.getElementById('recruitPanelSlide');
+    const recruitTitle = document.getElementById('recruitTitle');
+    const recruitBalance = document.getElementById('recruitBalance');
+    const recruitCardList = document.getElementById('recruitCardList');
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const sidebarClose = document.getElementById('sidebarClose');
+    const sidebarHeader = document.getElementById('sidebarHeader');
+
+    let hoverX = -1;
+    let hoverY = -1;
+    let recruitTarget = null;
+    let logEntries = [];
+    let currentTileSize = 40;
+    let mapOffsetX = 0;
+    let mapOffsetY = 0;
+
+    // ---- Initialise ----
+
+    initGame(['ember', 'tide', 'stone', 'gale']);
+
+    // ---- Canvas resize (300px sidebar) ----
+
+    // Resizes the canvas and recalculates layout for 300px sidebar
+    function resizeCanvas() {
+      var sidebarW = 300;
+      var padding = 20;
+      var gridSize = 16;
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      var availW = window.innerWidth - sidebarW - padding * 2;
+      var availH = window.innerHeight - padding * 2;
+      var tileSize = Math.floor(Math.min(availW, availH) / gridSize);
+      var mapPx = tileSize * gridSize;
+      currentTileSize = tileSize;
+      mapOffsetX = padding + Math.floor((availW - mapPx) / 2);
+      mapOffsetY = padding + Math.floor((availH - mapPx) / 2);
+      setRenderSize(tileSize, canvas.width, canvas.height, mapOffsetX, mapOffsetY);
+    }
+
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // ---- Logging (max 5, turn-prefixed) ----
+
+    // Appends a turn-prefixed message to the log
+    function addLog(msg) {
+      logEntries.unshift('T' + state.turnNumber + ' · ' + msg);
+      if (logEntries.length > 5) logEntries.length = 5;
+      renderLog();
+    }
+
+    // Renders log entries with alternating backgrounds
+    function renderLog() {
+      let html = '';
+      for (let i = 0; i < logEntries.length; i++) {
+        const cls = i === 0 ? 'log-entry log-newest' : (i % 2 === 0 ? 'log-entry' : 'log-entry log-alt');
+        html += '<div class="' + cls + '">' + logEntries[i] + '</div>';
+      }
+      actionLogEl.innerHTML = html;
+    }
+
+    // ---- UI helpers ----
+
+    // Returns a capitalised faction name
+    function cap(s) {
+      return s.charAt(0).toUpperCase() + s.slice(1);
+    }
+
+    // Returns the CSS color for a faction
+    function factionColor(name) {
+      const f = getFaction(name);
+      return f ? f.color : '#ffd700';
+    }
+
+    // Maps faction names to unique resource display names
+    function uniqueResourceName(faction) {
+      const names = { ember: 'Cinders', tide: 'Flow', stone: 'Ore', gale: 'Drift' };
+      return names[faction] || '?';
+    }
+
+    // Sets the --faction-color CSS variable on :root
+    function setFactionTheme() {
+      const color = factionColor(state.currentFaction);
+      document.documentElement.style.setProperty('--faction-color', color);
+    }
+
+    // ---- Sidebar panel updates ----
+
+    // Updates the dark header with faction name and turn
+    function updateTurnHeader() {
+      shFaction.textContent = cap(state.currentFaction);
+      shFaction.style.color = factionColor(state.currentFaction);
+      shTurn.textContent = 'Turn ' + state.turnNumber;
+    }
+
+    // Builds one resource row with faction dot and stats
+    function buildResourceRow(f) {
+      const active = f === state.currentFaction;
+      const color = factionColor(f);
+      const cls = active ? 'res-row res-active' : 'res-row';
+      let html = '<div class="' + cls + '">';
+      html += '<span class="faction-dot" style="background:' + color + '"></span>';
+      html += '<span class="res-name">' + cap(f) + '</span>';
+      html += '<span class="res-vals">E:' + state.essence[f] + ' ' + uniqueResourceName(f) + ':' + state.uniqueResources[f] + '</span>';
+      html += '</div>';
+      return html;
+    }
+
+    // Updates the resource panel with faction dot rows
+    function updateResourcePanel() {
+      let html = '';
+      for (let i = 0; i < state.factions.length; i++) {
+        html += buildResourceRow(state.factions[i]);
+      }
+      resourceInfoEl.innerHTML = html;
+    }
+
+    // Builds the 3-segment altar progress bar
+    function buildAltarBar(turns, holderColor) {
+      let html = '<div class="altar-bar">';
+      for (let i = 0; i < 3; i++) {
+        const filled = i < turns;
+        const bg = filled ? holderColor : '#d0cabb';
+        html += '<div class="altar-seg" style="background:' + bg + '"></div>';
+      }
+      html += '</div>';
+      html += '<div class="altar-hint">Hold for 3 turns to win</div>';
+      return html;
+    }
+
+    // Updates the altar section with holder and progress bar
+    function updateAltarPanel() {
+      if (state.altarHolder) {
+        const color = factionColor(state.altarHolder);
+        let html = '<div class="altar-holder" style="color:' + color + '">' + cap(state.altarHolder) + '</div>';
+        html += buildAltarBar(state.altarTurns, color);
+        altarInfoEl.innerHTML = html;
+      } else {
+        altarInfoEl.innerHTML = '<div class="altar-holder altar-none">Uncontested</div><div class="altar-hint">Hold for 3 turns to win</div>';
+      }
+    }
+
+    // Resets tile info to placeholder
+    function resetTileInfo() {
+      tileInfoEl.innerHTML = '<span class="tile-placeholder">Select a tile to inspect</span>';
+    }
+
+    // Refreshes all sidebar panels and closes overlays
+    function updateAllPanels() {
+      setFactionTheme();
+      updateTurnHeader();
+      updateResourcePanel();
+      updateAltarPanel();
+      resetTileInfo();
+      closeTechPanel();
+      closeRecruitPanel();
+    }
+
+    // ---- Sidebar toggle ----
+
+    // Opens the sidebar
+    function openSidebar() {
+      sidePanelEl.classList.add('open');
+      sidebarToggle.classList.add('hidden');
+    }
+
+    // Closes the sidebar
+    function closeSidebar() {
+      sidePanelEl.classList.remove('open');
+      sidebarToggle.classList.remove('hidden');
+    }
+
+    sidebarToggle.addEventListener('click', openSidebar);
+    sidebarClose.addEventListener('click', closeSidebar);
+
+    // ---- Tech panel (slide overlay) ----
+
+    // Checks if a tech has been researched by current faction
+    function isTechResearched(techKey) {
+      if (!state.researched || !state.researched[state.currentFaction]) return false;
+      return state.researched[state.currentFaction][techKey] === true;
+    }
+
+    // Builds the stats and button section of a tech card
+    function buildTechCardBody(techKey, def, researched, afford, currency) {
+      const unitDef = UNIT_TYPES[def.unlocks];
+      let html = '<div class="tc-unlocks">Unlocks: <strong>' + cap(def.unlocks) + '</strong></div>';
+      if (unitDef) {
+        html += '<div class="tc-stats">ATK ' + unitDef.attack + ' · DEF ' + unitDef.defense;
+        html += ' · HP ' + unitDef.maxHp + ' · MOV ' + unitDef.movement + '</div>';
+      }
+      html += '<div class="tc-footer">';
+      html += '<span class="tc-cost">' + def.cost + ' ' + currency + '</span>';
+      if (!researched) {
+        html += '<button class="tc-btn" data-tech="' + techKey + '"' + (afford ? '' : ' disabled') + '>';
+        html += afford ? 'Research' : 'Can\'t afford';
+        html += '</button>';
+      }
+      html += '</div>';
+      return html;
+    }
+
+    // Builds the full HTML for a single tech card
+    function buildTechCard(techKey, def) {
+      const researched = isTechResearched(techKey);
+      const afford = !researched && canAffordTech(state.currentFaction, techKey, state);
+      const currency = def.essence ? 'Essence' : uniqueResourceName(state.currentFaction);
+      let cls = 'tech-card';
+      if (researched) cls += ' researched';
+      if (afford && !researched) cls += ' affordable';
+      let html = '<div class="' + cls + '">';
+      html += '<div class="tc-header"><span class="tc-name">' + cap(techKey) + '</span>';
+      if (researched) html += '<span class="tc-badge">✓</span>';
+      html += '</div>';
+      html += buildTechCardBody(techKey, def, researched, afford, currency);
+      html += '</div>';
+      return html;
+    }
+
+    // Renders the full tech tree panel for the current faction
+    function renderTechPanel() {
+      const f = state.currentFaction;
+      techPanel.style.borderTopColor = factionColor(f);
+      techTitle.textContent = cap(f) + ' Tech Tree';
+      techBalance.innerHTML = 'Essence: <strong>' + state.essence[f] + '</strong> · '
+        + uniqueResourceName(f) + ': <strong>' + state.uniqueResources[f] + '</strong>';
+      const sharedKeys = Object.keys(SHARED_TECHS);
+      let sharedHtml = '';
+      for (let i = 0; i < sharedKeys.length; i++) {
+        sharedHtml += buildTechCard(sharedKeys[i], SHARED_TECHS[sharedKeys[i]]);
+      }
+      sharedTechList.innerHTML = sharedHtml;
+      const faction = getFaction(f);
+      factionTechLabel.textContent = cap(f) + ' Techs (' + uniqueResourceName(f) + ')';
+      let exclHtml = '';
+      for (let i = 0; i < faction.exclusiveTechs.length; i++) {
+        exclHtml += buildTechCard(faction.exclusiveTechs[i], EXCLUSIVE_TECHS[faction.exclusiveTechs[i]]);
+      }
+      factionTechList.innerHTML = exclHtml;
+    }
+
+    // Opens the tech panel overlay
+    function openTechPanel() {
+      closeRecruitPanel();
+      renderTechPanel();
+      techOverlay.classList.remove('hidden');
+    }
+
+    // Closes the tech panel overlay
+    function closeTechPanel() {
+      techOverlay.classList.add('hidden');
+    }
+
+    // ---- Recruit panel (slide overlay) ----
+
+    // Builds HTML for a single recruit unit card
+    function buildRecruitCard(unitType, cost, row, col) {
+      const afford = state.essence[state.currentFaction] >= cost;
+      const def = UNIT_TYPES[unitType];
+      let cls = 'tech-card';
+      if (afford) cls += ' affordable';
+      let html = '<div class="' + cls + '">';
+      html += '<div class="tc-header"><span class="tc-name">' + cap(unitType) + '</span></div>';
+      html += '<div class="tc-stats">ATK ' + def.attack + ' · DEF ' + def.defense;
+      html += ' · HP ' + def.maxHp + ' · MOV ' + def.movement + '</div>';
+      html += '<div class="tc-footer"><span class="tc-cost">' + cost + ' Essence</span>';
+      html += '<button class="tc-btn" data-recruit="' + unitType + '"';
+      html += ' data-row="' + row + '" data-col="' + col + '"';
+      html += (afford ? '' : ' disabled') + '>' + (afford ? 'Recruit' : 'Can\'t afford');
+      html += '</button></div></div>';
+      return html;
+    }
+
+    // Renders the recruit panel for a given capital tile
+    function renderRecruitPanel(row, col) {
+      const f = state.currentFaction;
+      recruitPanelSlide.style.borderTopColor = factionColor(f);
+      recruitTitle.textContent = cap(f) + ' Recruit';
+      recruitBalance.innerHTML = 'Essence: <strong>' + state.essence[f] + '</strong>';
+      const units = getRecruitableUnits(f, state);
+      let html = '';
+      for (let i = 0; i < units.length; i++) {
+        html += buildRecruitCard(units[i].type, units[i].cost, row, col);
+      }
+      recruitCardList.innerHTML = html;
+    }
+
+    // Opens the recruit panel for a specific capital tile
+    function openRecruitPanel(row, col) {
+      closeTechPanel();
+      recruitTarget = [row, col];
+      renderRecruitPanel(row, col);
+      recruitOverlay.classList.remove('hidden');
+    }
+
+    // Closes the recruit panel overlay
+    function closeRecruitPanel() {
+      recruitOverlay.classList.add('hidden');
+      recruitTarget = null;
+    }
+
+    // ---- Drawing ----
+
+    // Converts canvas pixel coordinates to grid col/row using offsets
+    function pixelToGrid(px, py) {
+      return {
+        x: Math.floor((px - mapOffsetX) / currentTileSize),
+        y: Math.floor((py - mapOffsetY) / currentTileSize)
+      };
+    }
+
+    // Redraws map, highlights, hover
+    function draw() {
+      renderMap(ctx, state.map);
+      if (state.selectedUnit) {
+        renderMoveHighlights(ctx, state.validMoves, state.map);
+        renderSelectedUnit(ctx, state.selectedUnit[0], state.selectedUnit[1]);
+      }
+      renderHover(ctx, state.map, hoverX, hoverY);
+    }
+
+    // Formats tile data as HTML for sidebar info panel
+    function formatTileInfo(tile, x, y) {
+      const oc = tile.owner || '';
+      const lines = [
+        '<span class="ti-label">Pos</span> <span class="ti-val">(' + x + ',' + y + ')</span>',
+        '<span class="ti-label">Terrain</span> <span class="ti-val">' + cap(tile.type) + '</span>',
+        '<span class="ti-label">Resource</span> <span class="ti-val">' + (tile.resource ? cap(tile.resource) : '—') + '</span>',
+        '<span class="ti-label">Owner</span> <span class="ti-val" style="color:' + (oc ? factionColor(oc) : '#888') + '">' + (oc ? cap(oc) : '—') + '</span>'
+      ];
+      if (tile.altar) lines.push('<span class="ti-val ti-special">★ Altar</span>');
+      if (tile.capital) lines.push('<span class="ti-val ti-special">⚑ Capital</span>');
+      if (tile.unit) {
+        const uc = factionColor(tile.unit.faction);
+        lines.push('<span class="ti-label">Unit</span> <span class="ti-val" style="color:' + uc + '">' + cap(tile.unit.type) + '</span>');
+        lines.push('<span class="ti-label">HP</span> <span class="ti-val">' + tile.unit.hp + '/' + tile.unit.maxHp + '</span>');
+        lines.push('<span class="ti-label">ATK/DEF</span> <span class="ti-val">' + tile.unit.attack + '/' + tile.unit.defense + '</span>');
+        lines.push('<span class="ti-label">Moves</span> <span class="ti-val">' + tile.unit.movesLeft + '/' + tile.unit.movement + '</span>');
+      }
+      return lines.join('<br>');
+    }
+
+    // Determines how the winner won
+    function getWinReason() {
+      if (state.altarTurns >= 3) return 'Held the Altar for 3 turns';
+      return 'All enemies defeated';
+    }
+
+    // Shows the win overlay with reason
+    function showWinOverlay() {
+      if (!state.winner) return;
+      const c = factionColor(state.winner);
+      winTitle.innerHTML = '<span style="color:' + c + '">' + cap(state.winner) + ' Wins!</span>';
+      winSub.textContent = getWinReason() + ' · Turn ' + state.turnNumber;
+      winOverlay.classList.remove('hidden');
+    }
+
+    // Shows the handoff overlay
+    function showHandoff() {
+      const f = state.currentFaction;
+      handoffFaction.style.color = factionColor(f);
+      handoffFaction.textContent = cap(f);
+      handoffOverlay.classList.remove('hidden');
+    }
+
+    // ---- Animation loop ----
+
+    // Runs the animation loop for altar glow effect
+    function animationLoop() {
+      tickAltarGlow();
+      draw();
+      requestAnimationFrame(animationLoop);
+    }
+
+    // ---- Event handlers ----
+
+    canvas.addEventListener('mousemove', function(e) {
+      const rect = canvas.getBoundingClientRect();
+      const pos = pixelToGrid(e.clientX - rect.left, e.clientY - rect.top);
+      if (pos.x !== hoverX || pos.y !== hoverY) { hoverX = pos.x; hoverY = pos.y; }
+    });
+
+    canvas.addEventListener('mouseleave', function() { hoverX = -1; hoverY = -1; });
+
+    // Main click handler for canvas
+    canvas.addEventListener('click', function(e) {
+      if (isTutorialActive()) return;
+      if (state.phase === 'gameover') return;
+      closeTechPanel();
+      closeRecruitPanel();
+      const rect = canvas.getBoundingClientRect();
+      const pos = pixelToGrid(e.clientX - rect.left, e.clientY - rect.top);
+      const col = pos.x, row = pos.y;
+      if (col < 0 || col >= MAP_SIZE || row < 0 || row >= MAP_SIZE) return;
+      const tile = state.map[row][col];
+      tileInfoEl.innerHTML = formatTileInfo(tile, col, row);
+      if (state.selectedUnit && isValidMove(row, col)) {
+        handleClickOnValidMove(row, col);
+        return;
+      }
+      if (tile.unit && tile.unit.faction === state.currentFaction) {
+        handleClickOnOwnUnit(tile, row, col);
+        return;
+      }
+      clearSelection();
+      if (tile.capital && tile.owner === state.currentFaction && !tile.unit) {
+        openRecruitPanel(row, col);
+      }
+    });
+
+    // Handles clicking a valid move or attack target
+    function handleClickOnValidMove(row, col) {
+      const result = handleMoveOrAttack(row, col);
+      if (result && result.action === 'attack') {
+        addLog('Dealt ' + result.result.defenderDmg + ', took ' + result.result.attackerDmg + (result.result.killed ? ' — killed!' : ''));
+      } else if (result) {
+        addLog('Moved to (' + col + ',' + row + ')');
+      }
+      tileInfoEl.innerHTML = formatTileInfo(state.map[row][col], col, row);
+      updateResourcePanel();
+    }
+
+    // Handles clicking on the player's own unit
+    function handleClickOnOwnUnit(tile, row, col) {
+      if (tile.unit.movesLeft > 0 && !tile.unit.hasAttacked) {
+        selectUnit(row, col);
+        addLog('Selected ' + cap(tile.unit.type));
+      } else {
+        clearSelection();
+        addLog('No moves left');
+      }
+    }
+
+    techPanel.addEventListener('click', function(e) {
+      const btn = e.target.closest('.tc-btn[data-tech]');
+      if (!btn || btn.disabled) return;
+      if (researchTech(state.currentFaction, btn.dataset.tech, state)) {
+        addLog('Researched ' + cap(btn.dataset.tech));
+        updateResourcePanel();
+        renderTechPanel();
+      }
+    });
+
+    recruitCardList.addEventListener('click', function(e) {
+      const btn = e.target.closest('.tc-btn[data-recruit]');
+      if (!btn || btn.disabled) return;
+      const type = btn.dataset.recruit;
+      const row = parseInt(btn.dataset.row);
+      const col = parseInt(btn.dataset.col);
+      if (recruitUnit(state.map, row, col, type, state.currentFaction, state)) {
+        addLog('Recruited ' + cap(type));
+        closeRecruitPanel();
+        updateResourcePanel();
+        tileInfoEl.innerHTML = formatTileInfo(state.map[row][col], col, row);
+      }
+    });
+
+    document.addEventListener('click', function(e) {
+      const closer = e.target.closest('[data-close]');
+      if (!closer) return;
+      if (closer.dataset.close === 'tech') closeTechPanel();
+      if (closer.dataset.close === 'recruit') closeRecruitPanel();
+    });
+
+    document.getElementById('btnTech').addEventListener('click', function() {
+      if (state.phase === 'gameover' || isTutorialActive()) return;
+      if (techOverlay.classList.contains('hidden')) openTechPanel();
+      else closeTechPanel();
+    });
+
+    document.getElementById('btnEndTurn').addEventListener('click', function() {
+      if (state.phase === 'gameover' || isTutorialActive()) return;
+      closeTechPanel();
+      closeRecruitPanel();
+      addLog(cap(state.currentFaction) + ' ends turn');
+      endTurn();
+      updateAllPanels();
+      if (state.winner) { showWinOverlay(); return; }
+      if (state.showHandoff) showHandoff();
+    });
+
+    handoffOverlay.addEventListener('click', function() {
+      dismissHandoff();
+      handoffOverlay.classList.add('hidden');
+      updateAllPanels();
+    });
+
+    function startNewGame() {
+      initGame(['ember', 'tide', 'stone', 'gale']);
+      winOverlay.classList.add('hidden');
+      handoffOverlay.classList.add('hidden');
+      closeTechPanel();
+      closeRecruitPanel();
+      logEntries = [];
+      addLog('Click your warrior to begin');
+      resetTileInfo();
+      hoverX = -1;
+      hoverY = -1;
+      updateAllPanels();
+    }
+
+    document.getElementById('btnRegenerate').addEventListener('click', startNewGame);
+    document.getElementById('btnNewGame').addEventListener('click', startNewGame);
+    document.getElementById('btnHowToPlay').addEventListener('click', function() { startTutorial(); });
+
+    // ---- Initial render ----
+
+    updateAllPanels();
+    addLog('Click your warrior to begin');
+    requestAnimationFrame(animationLoop);
+    if (window.innerWidth >= 900) openSidebar();
+    if (!hasTutorialBeenSeen()) startTutorial();
+  </script>
+
+</body>
+</html>
