@@ -8,11 +8,14 @@
 </head>
 <body>
 
-  <canvas id="gameCanvas"></canvas>
+  <!-- Setup / faction picker screen -->
+  <div id="setupScreen" class="setup-screen"></div>
 
-  <button class="sidebar-toggle" id="sidebarToggle">☰</button>
+  <canvas id="gameCanvas" style="display:none"></canvas>
 
-  <aside class="info-panel" id="sidePanel">
+  <button class="sidebar-toggle hidden" id="sidebarToggle">☰</button>
+
+  <aside class="info-panel" id="sidePanel" style="display:none">
     <!-- Dark header with faction name + turn -->
     <div class="sidebar-header" id="sidebarHeader">
       <div class="sh-faction" id="shFaction">Ember</div>
@@ -110,6 +113,7 @@
   <script src="factions.js"></script>
   <script src="units.js"></script>
   <script src="game.js"></script>
+  <script src="setup.js"></script>
   <script src="tutorial.js"></script>
   <script>
     // ---- DOM references ----
@@ -152,9 +156,23 @@
     let mapOffsetX = 0;
     let mapOffsetY = 0;
 
-    // ---- Initialise ----
+    // ---- Initialise (deferred until setup completes) ----
 
-    initGame(['ember', 'tide', 'stone', 'gale']);
+    // Starts the actual game after setup screen completes
+    function launchGame(factions) {
+      canvas.style.display = 'block';
+      sidePanelEl.style.display = 'flex';
+      initGame(factions);
+      resizeCanvas();
+      logEntries = [];
+      addLog('Click your warrior to begin');
+      resetTileInfo();
+      hoverX = -1;
+      hoverY = -1;
+      updateAllPanels();
+      if (window.innerWidth >= 900) openSidebar();
+      if (!hasTutorialBeenSeen()) startTutorial();
+    }
 
     // ---- Canvas resize (300px sidebar) ----
 
@@ -447,8 +465,9 @@
       };
     }
 
-    // Redraws map, highlights, hover
+    // Redraws map, highlights, hover (skips if no map yet)
     function draw() {
+      if (!state.map) return;
       renderMap(ctx, state.map);
       if (state.selectedUnit) {
         renderMoveHighlights(ctx, state.validMoves, state.map);
@@ -513,6 +532,7 @@
     // ---- Event handlers ----
 
     canvas.addEventListener('mousemove', function(e) {
+      if (isSetupActive()) return;
       const rect = canvas.getBoundingClientRect();
       const pos = pixelToGrid(e.clientX - rect.left, e.clientY - rect.top);
       if (pos.x !== hoverX || pos.y !== hoverY) { hoverX = pos.x; hoverY = pos.y; }
@@ -522,6 +542,7 @@
 
     // Main click handler for canvas
     canvas.addEventListener('click', function(e) {
+      if (isSetupActive()) return;
       if (isTutorialActive()) return;
       if (state.phase === 'gameover') return;
       closeTechPanel();
@@ -623,31 +644,47 @@
       updateAllPanels();
     });
 
+    // Shows the setup screen for a new game
     function startNewGame() {
-      initGame(['ember', 'tide', 'stone', 'gale']);
       winOverlay.classList.add('hidden');
       handoffOverlay.classList.add('hidden');
       closeTechPanel();
       closeRecruitPanel();
-      logEntries = [];
-      addLog('Click your warrior to begin');
-      resetTileInfo();
-      hoverX = -1;
-      hoverY = -1;
-      updateAllPanels();
+      canvas.style.display = 'none';
+      sidePanelEl.style.display = 'none';
+      showSetupScreen();
     }
 
     document.getElementById('btnRegenerate').addEventListener('click', startNewGame);
     document.getElementById('btnNewGame').addEventListener('click', startNewGame);
     document.getElementById('btnHowToPlay').addEventListener('click', function() { startTutorial(); });
 
-    // ---- Initial render ----
+    // ---- Setup screen event delegation ----
 
-    updateAllPanels();
-    addLog('Click your warrior to begin');
+    // Handles all clicks inside the setup screen
+    document.getElementById('setupScreen').addEventListener('click', function(e) {
+      var countBtn = e.target.closest('[data-count]');
+      if (countBtn) {
+        setPlayerCount(parseInt(countBtn.dataset.count));
+        return;
+      }
+      var factionBtn = e.target.closest('[data-faction]');
+      if (factionBtn && !factionBtn.disabled) {
+        selectFaction(parseInt(factionBtn.dataset.player), factionBtn.dataset.faction);
+        return;
+      }
+      var beginBtn = e.target.closest('#setupBegin');
+      if (beginBtn && !beginBtn.disabled) {
+        beginGame();
+        launchGame(getSelectedFactions());
+        return;
+      }
+    });
+
+    // ---- Initial render — show setup screen ----
+
     requestAnimationFrame(animationLoop);
-    if (window.innerWidth >= 900) openSidebar();
-    if (!hasTutorialBeenSeen()) startTutorial();
+    renderSetupScreen();
   </script>
 
 </body>
